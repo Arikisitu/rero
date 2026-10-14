@@ -53,8 +53,14 @@ jobs:
           fi
         working-directory: android
 
+      - name: Verify APK Generated
+        run: |
+          ls -la android/app/build/outputs/apk/debug/ || true
+          find android/ -name "*.apk"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: rero-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
