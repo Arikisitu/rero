@@ -43,24 +43,17 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Build Android Debug APK
-        run: |
-          if ! ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee build.log; then
-            echo "## Gradle Build Failed" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -n 100 build.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 1
-          fi
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
         working-directory: android
 
       - name: Verify APK Generated
         run: |
-          ls -la android/app/build/outputs/apk/debug/ || true
+          ls -la android/app/build/outputs/apk/debug/
           find android/ -name "*.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: rero-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
