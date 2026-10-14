@@ -12,8 +12,28 @@ import {
   createWidgetSnapshot
 } from './services/streak'
 import { syncWidgetWithStats, checkInitialWidgetRoute } from './services/widgetBridge'
+import {
+  checkGrammar,
+  applySuggestion,
+  applyAllSuggestions,
+  type GrammarIssue
+} from './services/grammar'
+import {
+  startNativeAudioRecording,
+  stopNativeAudioRecording,
+  deleteNativeAudioFile
+} from './services/audioRecorderBridge'
 
-type Entry = { id: string; title: string; text: string; date: string; seconds: number; expressions: string[] }
+type Entry = {
+  id: string
+  title: string
+  text: string
+  originalText?: string
+  date: string
+  seconds: number
+  expressions: string[]
+  audioPath?: string
+}
 type Expression = { id: string; phrase: string; kind: string; learned: boolean; entryId?: string }
 type Page = 'Dashboard' | 'Speaking Diary' | 'Lessons' | 'Expressions' | 'Timeline' | 'Progress' | 'Settings'
 
@@ -200,6 +220,36 @@ const suggestions = (text: string) => {
   return candidates.filter(p => text.toLowerCase().includes(p)).slice(0, 8)
 }
 
+function renderUnderlinedText(text: string, issues: GrammarIssue[]) {
+  if (!issues.length || !text) return <>{text}</>
+
+  const elements: (string | JSX.Element)[] = []
+  let lastIndex = 0
+
+  for (const issue of issues) {
+    if (issue.offset > lastIndex) {
+      elements.push(text.slice(lastIndex, issue.offset))
+    }
+    const spanText = text.slice(issue.offset, issue.offset + issue.length)
+    elements.push(
+      <span
+        key={issue.id}
+        className="grammar-error"
+        title={issue.explanation}
+      >
+        {spanText}
+      </span>
+    )
+    lastIndex = issue.offset + issue.length
+  }
+
+  if (lastIndex < text.length) {
+    elements.push(text.slice(lastIndex))
+  }
+
+  return <>{elements}</>
+}
+
 export default function App() {
   const [entries, setEntries] = useState<Entry[]>(() => read(STORE, starterEntries))
   const [expressions, setExpressions] = useState<Expression[]>(() => read(EX_STORE, []))
@@ -230,6 +280,17 @@ export default function App() {
   const timerRef = useRef<number | null>(null)
   const startTimeRef = useRef<number>(0)
   const sessionSecondsRef = useRef<number>(0)
+
+  // Grammar and audio recording tracking
+  const [showGrammarReview, setShowGrammarReview] = useState(false)
+  const [ignoredIssueIds, setIgnoredIssueIds] = useState<Set<string>>(new Set())
+  const originalDraftRef = useRef<string>('')
+  const lastAudioPathRef = useRef<string>('')
+
+  const activeIssues = useMemo(() => {
+    const all = checkGrammar(draft)
+    return all.filter(issue => !ignoredIssueIds.has(issue.id))
+  }, [draft, ignoredIssueIds])
 
   useEffect(() => { localStorage.setItem(STORE, JSON.stringify(entries)) }, [entries])
   useEffect(() => { localStorage.setItem(EX_STORE, JSON.stringify(expressions)) }, [expressions])
@@ -301,7 +362,7 @@ export default function App() {
   const filteredEntries = entries.filter(e => `${e.title} ${e.text}`.toLowerCase().includes(search.toLowerCase())).sort((a,b) => b.date.localeCompare(a.date))
   const selected = entries.find(e => e.id === selectedEntry)
 
-  function stopRecording() {
+  function stopRecording(discard = false) {
     // 1. Stop timer and finalize elapsed monotonic duration
     if (timerRef.current) {
       window.clearInterval(timerRef.current)
@@ -315,17 +376,30 @@ export default function App() {
     }
 
     // 2. Commit any remaining interim text that didn't receive an isFinal event
-    if (interimRef.current.trim()) {
+    if (interimRef.current.trim() && !discard) {
       appendFinalSegment(finalSegmentsRef.current, interimRef.current.trim())
       interimRef.current = ''
       const parts = [
         baseTextRef.current.trim(),
         finalSegmentsRef.current.join(' ').trim()
       ].filter(Boolean)
-      setDraft(parts.join(' ').trim())
+      const finalized = parts.join(' ').trim()
+      setDraft(finalized)
+      if (!originalDraftRef.current) {
+        originalDraftRef.current = finalized
+      }
+    } else {
+      interimRef.current = ''
     }
 
-    // 3. Clean up recognition instance and remove listeners to prevent duplicates
+    // 3. Stop native background audio recording service
+    stopNativeAudioRecording(discard).then(res => {
+      if (res.audioFilePath) {
+        lastAudioPathRef.current = res.audioFilePath
+      }
+    })
+
+    // 4. Clean up recognition instance and remove listeners to prevent duplicates
     if (recognition.current) {
       try {
         recognition.current.onresult = null
@@ -338,16 +412,36 @@ export default function App() {
       recognition.current = null
     }
     setRecording(false)
+
+    // 5. Reveal grammar review suggestions only after recording ends
+    if (!discard) {
+      if (!originalDraftRef.current && draft.trim()) {
+        originalDraftRef.current = draft.trim()
+      }
+      setShowGrammarReview(true)
+    }
   }
 
   function startRecording() {
-    stopRecording()
+    stopRecording(true)
+
+    originalDraftRef.current = draft.trim()
+    setShowGrammarReview(false)
+    setIgnoredIssueIds(new Set())
+
+    // Also start native background audio recording service on Android
+    startNativeAudioRecording().then(res => {
+      if (res.audioFilePath) {
+        lastAudioPathRef.current = res.audioFilePath
+      }
+    })
 
     const speechWin = window as unknown as SpeechWindow
     const SpeechRecognitionClass = speechWin.SpeechRecognition || speechWin.webkitSpeechRecognition
     if (!SpeechRecognitionClass) {
-      setNotice('Speech recognition is not supported in this browser. Try Chrome or Safari, or type your entry below.')
+      setNotice('Online speech transcription is not available in this browser, but native background recording is active. You can speak or write below.')
       setPage('Speaking Diary')
+      setRecording(true)
       return
     }
 
@@ -407,33 +501,37 @@ export default function App() {
         } else if (err === 'not-allowed' || err === 'service-not-allowed') {
           setNotice('Microphone permission was denied. Please allow microphone access in browser settings.')
         } else if (err === 'network') {
-          setNotice('Speech recognition network error. Speech recognition requires an internet connection on mobile. Manual typing remains available.')
+          setNotice('Speech recognition network disconnected, but background audio recording continues safely.')
         } else if (err !== 'aborted') {
           setNotice(`Microphone issue: ${err}`)
         }
-        stopRecording()
+        stopRecording(false)
       }
 
       rec.onend = () => {
-        stopRecording()
+        stopRecording(false)
       }
 
       recognition.current = rec
       rec.start()
       setRecording(true)
       setPage('Speaking Diary')
-      setNotice('Listening… speak naturally.')
+      setNotice('Listening… speak naturally. Background recording is active.')
     } catch {
       setNotice('Could not start the microphone. Check browser permissions.')
-      stopRecording()
+      stopRecording(true)
     }
   }
 
   function startNewEntry(presetTitle = '') {
-    stopRecording()
+    stopRecording(true)
     setDraft('')
     setTitle(presetTitle)
     setEditing(null)
+    originalDraftRef.current = ''
+    lastAudioPathRef.current = ''
+    setShowGrammarReview(false)
+    setIgnoredIssueIds(new Set())
     sessionSecondsRef.current = 0
     setElapsedSeconds(0)
     setPage('Speaking Diary')
@@ -441,7 +539,7 @@ export default function App() {
 
   function saveEntry() {
     if (!draft.trim()) { setNotice('Write or record something before saving.'); return }
-    stopRecording()
+    stopRecording(false)
     const existing = entries.find(e => e.id === editing)
     const actualSeconds = sessionSecondsRef.current > 0
       ? sessionSecondsRef.current
@@ -451,9 +549,11 @@ export default function App() {
       id: editing || uid(),
       title: title.trim() || draft.trim().split(/[.!?]/)[0].slice(0, 42) || 'Speaking practice',
       text: draft.trim(),
+      originalText: originalDraftRef.current || draft.trim(),
       date: existing?.date || day(),
       seconds: actualSeconds,
-      expressions: suggestions(draft)
+      expressions: suggestions(draft),
+      audioPath: lastAudioPathRef.current || existing?.audioPath
     }
     setEntries(old => existing ? old.map(e => e.id === editing ? item : e) : [item, ...old])
     logActivity('speaking_session', item.title)
@@ -464,6 +564,8 @@ export default function App() {
     setDraft('')
     setTitle('')
     setEditing(null)
+    originalDraftRef.current = ''
+    lastAudioPathRef.current = ''
     sessionSecondsRef.current = 0
     setElapsedSeconds(0)
     setPage('Timeline')
@@ -472,16 +574,49 @@ export default function App() {
   }
 
   function editEntry(entry: Entry) {
-    stopRecording()
+    stopRecording(true)
     setEditing(entry.id)
     setTitle(entry.title)
     setDraft(entry.text)
+    originalDraftRef.current = entry.originalText || entry.text
+    lastAudioPathRef.current = entry.audioPath || ''
+    setShowGrammarReview(false)
+    setIgnoredIssueIds(new Set())
     sessionSecondsRef.current = entry.seconds
     setElapsedSeconds(entry.seconds)
     setPage('Speaking Diary')
   }
 
-  function deleteEntry(id: string) { setEntries(old => old.filter(e => e.id !== id)); setExpressions(old => old.filter(e => e.entryId !== id)); if (selectedEntry === id) setSelectedEntry(null); setNotice('Entry deleted.') }
+  function deleteEntry(id: string) {
+    const toDelete = entries.find(e => e.id === id)
+    if (toDelete?.audioPath) {
+      deleteNativeAudioFile(toDelete.audioPath)
+    }
+    setEntries(old => old.filter(e => e.id !== id))
+    setExpressions(old => old.filter(e => e.entryId !== id))
+    if (selectedEntry === id) setSelectedEntry(null)
+    setNotice('Entry deleted.')
+  }
+
+  function handleApplySuggestion(issue: GrammarIssue) {
+    setDraft(prev => applySuggestion(prev, issue))
+  }
+
+  function handleIgnoreSuggestion(issueId: string) {
+    setIgnoredIssueIds(prev => new Set([...prev, issueId]))
+  }
+
+  function handleApplyAll() {
+    setDraft(prev => applyAllSuggestions(prev, activeIssues))
+    setNotice('All suggestions applied.')
+  }
+
+  function handleRevertToOriginal() {
+    if (originalDraftRef.current) {
+      setDraft(originalDraftRef.current)
+      setNotice('Reverted to original transcript.')
+    }
+  }
   function addExpression() {
     if (!exprDraft.trim()) return
     const phrase = exprDraft.trim()
@@ -570,10 +705,10 @@ export default function App() {
             <section className="panel recent-panel"><div className="section-head"><div><h3>Recent entries</h3><p className="muted small">Little moments from your life</p></div><button className="text-btn" onClick={() => setPage('Timeline')}>View all <span>→</span></button></div>{entries.length === 0 ? <Empty icon={Headphones} title="Your story starts here" text="Record or write your first speaking diary entry."/> : entries.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4).map(e=><EntryRow key={e.id} entry={e} onClick={() => {setSelectedEntry(e.id);setPage('Timeline')}}/>)}</section></div>
           <div className="bottom-grid"><section className="panel prompt-panel"><div className="prompt-icon"><Sparkles size={18}/></div><div><div className="eyebrow">TODAY’S SPEAKING PROMPT</div><h3>What is something small that made you happy recently?</h3><p className="muted small">Try speaking for 1–2 minutes without stopping to correct yourself.</p></div><button className="round-arrow" onClick={() => startNewEntry('Something that made me happy')}>↗</button></section><section className="panel mini-progress"><div className="section-head"><h3>Your journey</h3><button className="text-btn" onClick={() => setPage('Progress')}>Details →</button></div><div className="progress-line"><span style={{width: `${Math.min(100, entries.length*10)}%`}}/></div><p className="muted small">{entries.length === 0 ? 'Your first entry is the first step.' : `${entries.length} entries captured. Keep going at your own pace.`}</p></section></div>
         </>}
-        {page === 'Speaking Diary' && <><PageHeading eyebrow="SPEAKING PRACTICE" title={editing ? 'Edit your entry' : 'Give your thoughts a voice'} subtitle="Talk naturally. You can tidy up your words afterward."/><div className="record-layout"><section className="panel record-card"><div className={`mic-circle ${recording ? 'is-recording' : ''}`}><Mic size={31}/></div><h2>{recording ? 'I’m listening…' : 'Ready when you are'}</h2><p className="muted">{recording ? 'Speak naturally. Your words will appear on the right.' : 'There is no perfect way to begin.'}</p><div className="wave-bars">{Array.from({length:25},(_,i)=><i key={i} style={{height:`${recording ? 12+(i*7)%32 : 5+(i*3)%10}px`}}/>)}</div><div className={`recording-timer ${recording ? 'is-live' : ''}`}><Clock3 size={15}/><span>{formatTimer(elapsedSeconds)}</span></div>{recording ? <button className="btn btn-danger" onClick={stopRecording}><span className="stop-square"/> Stop recording</button> : <button className="btn btn-primary" onClick={startRecording}><Mic size={17}/> Start recording</button>}<div className="record-note"><span className="privacy-dot"/>{' '}Your entries stay in this browser</div></section>
-          <section className="panel transcript-card"><div className="section-head"><div><h3>Your transcript</h3><p className="muted small">Write or edit your words here</p></div><span className="live-tag">{recording && <i/>}{recording ? `LIVE · ${formatTimer(elapsedSeconds)}` : 'DRAFT'}</span></div><label className="field-label" htmlFor="entry-title">Entry title</label><input id="entry-title" className="text-input" value={title} onChange={e=>setTitle(e.target.value)} placeholder="A little moment from today"/><label className="field-label" htmlFor="entry-text">What’s on your mind?</label><textarea id="entry-text" className="transcript-input" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Start writing here, or tap Start recording and speak about your day…"/><div className="transcript-footer"><span className="muted small">{draft.trim() ? draft.trim().split(/\s+/).length : 0} words{elapsedSeconds > 0 ? ` · ${formatDuration(elapsedSeconds)}` : ''}</span><button className="btn btn-primary" onClick={saveEntry}><Check size={16}/>{editing ? 'Update entry' : 'Save entry'}</button></div></section></div><section className="tip-strip"><Sparkles size={18}/><div><strong>A gentle reminder</strong><p className="muted small">Fluency grows when you keep going, not when every sentence is perfect.</p></div></section></>}
+        {page === 'Speaking Diary' && <><PageHeading eyebrow="SPEAKING PRACTICE" title={editing ? 'Edit your entry' : 'Give your thoughts a voice'} subtitle="Talk naturally. You can tidy up your words afterward."/><div className="record-layout"><section className="panel record-card"><div className={`mic-circle ${recording ? 'is-recording' : ''}`}><Mic size={31}/></div><h2>{recording ? 'I’m listening…' : 'Ready when you are'}</h2><p className="muted">{recording ? 'Speak naturally. Background recording keeps your audio safe.' : 'There is no perfect way to begin.'}</p><div className="wave-bars">{Array.from({length:25},(_,i)=><i key={i} style={{height:`${recording ? 12+(i*7)%32 : 5+(i*3)%10}px`}}/>)}</div><div className={`recording-timer ${recording ? 'is-live' : ''}`}><Clock3 size={15}/><span>{formatTimer(elapsedSeconds)}</span></div>{recording ? <div style={{display:'flex',gap:'8px',flexWrap:'wrap',justifyContent:'center'}}><button className="btn btn-danger" onClick={() => stopRecording(false)}><span className="stop-square"/> Stop recording</button><button className="btn btn-secondary" onClick={() => stopRecording(true)}>Discard</button></div> : <button className="btn btn-primary" onClick={startRecording}><Mic size={17}/> Start recording</button>}<div className="record-note"><span className="privacy-dot"/>{' '}Your entries stay on this device</div></section>
+          <section className="panel transcript-card"><div className="section-head"><div><h3>Your transcript</h3><p className="muted small">{recording ? 'Live transcription (errors underlined)' : 'Write or edit your words here'}</p></div><span className="live-tag">{recording && <i/>}{recording ? `LIVE · ${formatTimer(elapsedSeconds)}` : 'DRAFT'}</span></div><label className="field-label" htmlFor="entry-title">Entry title</label><input id="entry-title" className="text-input" value={title} onChange={e=>setTitle(e.target.value)} placeholder="A little moment from today"/><label className="field-label" htmlFor="entry-text">What’s on your mind?</label>{recording ? <div className="transcript-live-box"><div className="transcript-live-text">{draft ? renderUnderlinedText(draft, activeIssues) : <span className="muted">Listening for your speech…</span>}</div></div> : <textarea id="entry-text" className="transcript-input" value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Start writing here, or tap Start recording and speak about your day…"/>}{!recording && activeIssues.length > 0 && <div className="grammar-review-box"><div className="grammar-review-head"><div className="grammar-review-title"><Sparkles size={16}/><span>Grammar &amp; Spelling ({activeIssues.length})</span></div><div className="grammar-review-actions"><button type="button" className="btn-grammar-apply" onClick={handleApplyAll}>Apply all</button><button type="button" className="btn-grammar-ignore" onClick={() => setShowGrammarReview(!showGrammarReview)}>{showGrammarReview ? 'Hide' : 'Review'}</button>{originalDraftRef.current && originalDraftRef.current !== draft && <button type="button" className="btn-grammar-ignore" onClick={handleRevertToOriginal}>Revert to original</button>}</div></div>{showGrammarReview && <div className="grammar-issue-list">{activeIssues.map(issue => <div key={issue.id} className="grammar-issue-card"><div className="grammar-issue-top"><span className={`grammar-issue-badge ${issue.category}`}>{issue.category}</span><div className="grammar-card-actions"><button type="button" className="btn-grammar-apply" onClick={() => handleApplySuggestion(issue)}>Apply</button><button type="button" className="btn-grammar-ignore" onClick={() => handleIgnoreSuggestion(issue.id)}>Dismiss</button></div></div><div className="grammar-diff"><span className="orig">{issue.originalText}</span><span>→</span><span className="repl">{issue.suggestedReplacement}</span></div><div className="grammar-explanation">{issue.explanation}</div></div>)}</div>}</div>}<div className="transcript-footer"><span className="muted small">{draft.trim() ? draft.trim().split(/\s+/).length : 0} words{elapsedSeconds > 0 ? ` · ${formatDuration(elapsedSeconds)}` : ''}</span><button className="btn btn-primary" onClick={saveEntry}><Check size={16}/>{editing ? 'Update entry' : 'Save entry'}</button></div></section></div><section className="tip-strip"><Sparkles size={18}/><div><strong>A gentle reminder</strong><p className="muted small">Fluency grows when you keep going, not when every sentence is perfect.</p></div></section></>}
         {page === 'Lessons' && <><PageHeading eyebrow="STRUCTURED SPEAKING PRACTICE" title="Guided Lessons" subtitle="Short, focused lessons designed to build fluency one small step at a time."/><div className="stats-grid"><Stat icon={GraduationCap} label="Lessons completed" value={activities.filter(a => a.type === 'lesson_completed').length.toString()} hint="All-time completed"/><Stat icon={Flame} label="Daily streak" value={streakStats.currentStreak.toString()} hint={streakStats.todayCompleted ? 'Active today ✓' : 'Complete a lesson to build'}/><Stat icon={Clock3} label="Practice time" value="2–3 min" hint="Bite-sized format"/><Stat icon={Sparkles} label="Daily goal" value={streakStats.todayCompleted ? 'Reached ✓' : '1 needed'} hint="Small daily steps"/></div><div className="lessons-grid">{lessonsData.map(lesson => { const isCompletedToday = activities.some(a => a.type === 'lesson_completed' && a.detail === lesson.title && a.date === day()); const isExpanded = activeLessonId === lesson.id; return <section key={lesson.id} className="panel lesson-card"><div className="lesson-top"><span className="pill">{lesson.level}</span><span className="muted small">{lesson.duration}</span>{isCompletedToday && <span className="pill pill-success">✓ Done today</span>}</div><h3>{lesson.title}</h3><p className="muted small">{lesson.description}</p><div className="chips">{lesson.keyPhrases.map(p => <span key={p} className="chip">{p}</span>)}</div>{isExpanded && <div className="lesson-expanded"><div className="prompt-box"><div className="prompt-label">PRACTICE PROMPT</div><p><strong>{lesson.prompt}</strong></p><p className="muted tiny">{lesson.tips}</p></div><div className="lesson-actions"><button className="btn btn-secondary" onClick={() => { startNewEntry(lesson.title); setDraft(`Prompt: ${lesson.prompt}\n\n`) }}><Mic size={15}/> Speak in diary ↗</button><button className="btn btn-primary" onClick={() => completeLesson(lesson)}><Check size={15}/> Complete lesson</button></div></div>}<div className="lesson-footer"><button className="text-btn" onClick={() => setActiveLessonId(isExpanded ? null : lesson.id)}>{isExpanded ? 'Hide details ↑' : 'Start lesson ↓'}</button></div></section> })}</div></>}
-        {page === 'Timeline' && <><PageHeading eyebrow="YOUR PERSONAL ARCHIVE" title="My speaking timeline" subtitle="Look back at your journey and see how your expression grows over time."/><div className="toolbar"><div className="searchbox"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search your entries…"/></div><button className="btn btn-primary" onClick={() => startNewEntry()}><Plus size={17}/> New entry</button></div>{filteredEntries.length === 0 ? <div className="panel"><Empty icon={CalendarDays} title={search ? 'No matching entries' : 'Your timeline is waiting'} text={search ? 'Try another search term.' : 'Your diary entries will appear here after you save them.'}/></div> : <div className="timeline-layout"><div className="timeline-list"><div className="month-label">{new Date(`${filteredEntries[0].date}T12:00:00`).toLocaleDateString(undefined,{month:'long',year:'numeric'})}</div>{filteredEntries.map(e=><button key={e.id} className={`timeline-item ${selectedEntry===e.id?'selected':''}`} onClick={()=>setSelectedEntry(e.id)}><span className="timeline-dot"/><div className="timeline-date">{formatDate(e.date)} · {formatDuration(e.seconds)}</div><strong>{e.title}</strong><p>{e.text.slice(0,95)}{e.text.length>95?'…':''}</p></button>)}</div><div className="panel entry-detail">{selected ? <><div className="detail-top"><span className="pill">{formatDate(selected.date)} · {formatDuration(selected.seconds)}</span><div><button className="icon-btn" onClick={()=>editEntry(selected)} aria-label="Edit entry"><Pencil size={17}/></button><button className="icon-btn danger-icon" onClick={()=>{if(window.confirm('Delete this entry?')) deleteEntry(selected.id)}} aria-label="Delete entry"><Trash2 size={17}/></button></div></div><h2>{selected.title}</h2><p className="muted small">{new Date(`${selected.date}T12:00:00`).toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p><div className="detail-section"><h4>Transcript</h4><p className="transcript-copy">{selected.text}</p></div><div className="detail-section"><h4>Expressions noticed</h4><div className="chips">{selected.expressions.length ? selected.expressions.map(p=><span className="chip" key={p}>{p}</span>) : <span className="muted small">No automatic matches yet. You can add expressions manually in the library.</span>}</div></div></> : <Empty icon={FileText} title="Choose an entry" text="Select a moment from the timeline to read it here."/>}</div></div>}</>}
+        {page === 'Timeline' && <><PageHeading eyebrow="YOUR PERSONAL ARCHIVE" title="My speaking timeline" subtitle="Look back at your journey and see how your expression grows over time."/><div className="toolbar"><div className="searchbox"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search your entries…"/></div><button className="btn btn-primary" onClick={() => startNewEntry()}><Plus size={17}/> New entry</button></div>{filteredEntries.length === 0 ? <div className="panel"><Empty icon={CalendarDays} title={search ? 'No matching entries' : 'Your timeline is waiting'} text={search ? 'Try another search term.' : 'Your diary entries will appear here after you save them.'}/></div> : <div className="timeline-layout"><div className="timeline-list"><div className="month-label">{new Date(`${filteredEntries[0].date}T12:00:00`).toLocaleDateString(undefined,{month:'long',year:'numeric'})}</div>{filteredEntries.map(e=><button key={e.id} className={`timeline-item ${selectedEntry===e.id?'selected':''}`} onClick={()=>setSelectedEntry(e.id)}><span className="timeline-dot"/><div className="timeline-date">{formatDate(e.date)} · {formatDuration(e.seconds)}</div><strong>{e.title}</strong><p>{e.text.slice(0,95)}{e.text.length>95?'…':''}</p></button>)}</div><div className="panel entry-detail">{selected ? <><div className="detail-top"><span className="pill">{formatDate(selected.date)} · {formatDuration(selected.seconds)}</span><div><button className="icon-btn" onClick={()=>editEntry(selected)} aria-label="Edit entry"><Pencil size={17}/></button><button className="icon-btn danger-icon" onClick={()=>{if(window.confirm('Delete this entry?')) deleteEntry(selected.id)}} aria-label="Delete entry"><Trash2 size={17}/></button></div></div><h2>{selected.title}</h2><p className="muted small">{new Date(`${selected.date}T12:00:00`).toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p><div className="detail-section"><h4>Transcript</h4><p className="transcript-copy">{selected.text}</p></div>{selected.originalText && selected.originalText !== selected.text && <div className="detail-section"><details className="original-transcript-detail"><summary style={{cursor:'pointer',fontWeight:600,fontSize:'12px',color:'var(--purple-dark)'}}>View original spoken transcript</summary><p className="transcript-copy" style={{opacity:0.8,marginTop:'8px',fontStyle:'italic'}}>{selected.originalText}</p></details></div>}<div className="detail-section"><h4>Expressions noticed</h4><div className="chips">{selected.expressions.length ? selected.expressions.map(p=><span className="chip" key={p}>{p}</span>) : <span className="muted small">No automatic matches yet. You can add expressions manually in the library.</span>}</div></div></> : <Empty icon={FileText} title="Choose an entry" text="Select a moment from the timeline to read it here."/>}</div></div>}</>}
         {page === 'Expressions' && <><PageHeading eyebrow="YOUR PERSONAL PHRASEBOOK" title="Expression library" subtitle="Collect useful phrases and revisit them until they feel natural."/><div className="add-expression panel"><div className="prompt-icon"><BookOpen size={18}/></div><div className="add-expression-content"><h3>Save a phrase</h3><p className="muted small">Add a word, idiom, or expression you want to remember.</p><div className="inline-form"><input className="text-input" value={exprDraft} onChange={e=>setExprDraft(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addExpression()} placeholder="e.g. I’m looking forward to…"/><button className="btn btn-primary" onClick={addExpression}><Plus size={16}/> Save</button></div></div></div><div className="toolbar"><div className="searchbox"><Search size={17}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Find an expression…"/></div><span className="muted small">{expressions.filter(e=>e.learned).length} learned of {expressions.length}</span></div>{expressions.filter(e=>e.phrase.toLowerCase().includes(search.toLowerCase())).length === 0 ? <div className="panel"><Empty icon={BookOpen} title="Your phrasebook starts here" text="Save a phrase above, or save entries with expressions that match the built-in phrase list."/></div> : <div className="expression-grid">{expressions.filter(e=>e.phrase.toLowerCase().includes(search.toLowerCase())).map(e=><div className="expression-card panel" key={e.id}><div className="expression-card-top"><span className="pill">{e.kind}</span><button className="icon-btn" aria-label="Delete expression" onClick={()=>setExpressions(old=>old.filter(x=>x.id!==e.id))}><Trash2 size={16}/></button></div><h3>{e.phrase}</h3><div className="expression-bottom"><button className={`learn-toggle ${e.learned?'learned':''}`} onClick={()=>setExpressions(old=>old.map(x=>{if(x.id===e.id){if(!x.learned) logActivity('expression_practice', x.phrase);return {...x,learned:!x.learned}}return x}))}>{e.learned?<Check size={15}/>:<BookOpen size={15}/>} {e.learned?'Learned':'Mark learned'}</button><span className="muted tiny">{e.learned?'Nicely done':'Keep practicing'}</span></div></div>)}</div>}</>}
         {page === 'Progress' && <><PageHeading eyebrow="SMALL STEPS ADD UP" title="My progress" subtitle="A gentle look at your speaking practice and learning journey."/><div className="stats-grid"><Stat icon={Flame} label="Current streak" value={streakStats.currentStreak.toString()} hint={streakStats.todayCompleted ? 'Goal reached today ✓' : '1 activity to continue'}/><Stat icon={Sparkles} label="Best streak" value={streakStats.bestStreak.toString()} hint="All-time record"/><Stat icon={Clock3} label="Speaking minutes" value={Math.round(totalSeconds/60).toString()} hint="Estimated from practice"/><Stat icon={GraduationCap} label="Lessons completed" value={activities.filter(a => a.type === 'lesson_completed').length.toString()} hint="Structured lessons"/></div><div className="progress-page-grid"><section className="panel"><div className="section-head"><div><h3>Recent activity</h3><p className="muted small">Entries and practice by day</p></div><span className="pill">Last 7 days</span></div><div className="bar-chart">{Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-(6-i));const ds=d.toISOString().slice(0,10);const count=entries.filter(e=>e.date===ds).length+activities.filter(a=>a.date===ds).length;return <div className="bar-col" key={ds}><div className="bar-value">{count||''}</div><div className="bar-track"><div className="bar-fill" style={{height:`${Math.max(count?12:3,Math.min(100,count*28))}%`}}/></div><span>{d.toLocaleDateString(undefined,{weekday:'short'})}</span></div>})}</div><div className="weekly-strip">{streakStats.weeklyDays.map(d=><div key={d.date} className="weekly-dot-col"><span className="muted tiny">{d.dayShort}</span><span className={`weekly-dot ${d.completed?'active':''} ${d.isToday?'today':''}`} title={`${d.dayName} (${d.date}): ${d.completed?'Completed':'No activity'}`}/></div>)}</div></section><section className="panel insight-panel"><div className="prompt-icon"><Sparkles size={18}/></div><h3>Consistency over perfection</h3><p className="muted">You don’t need a long session to improve. A few minutes of speaking, a quick lesson, or learning a new expression keeps your momentum alive.</p><div className="insight-number">{streakStats.totalActiveDays}<span> active {streakStats.totalActiveDays===1?'day':'days'}</span></div></section></div></>}
         {page === 'Settings' && <><PageHeading eyebrow="YOUR SPACE, YOUR WAY" title="Settings" subtitle="Manage your data and make Rero feel like yours."/><div className="settings-stack"><section className="panel settings-card"><div className="settings-icon"><Download size={19}/></div><div className="settings-body"><h3>Export your data</h3><p className="muted small">Download your entries and expressions as a JSON backup.</p></div><button className="btn btn-secondary" onClick={exportData}>Export data</button></section><section className="panel settings-card"><div className="settings-icon"><Upload size={19}/></div><div className="settings-body"><h3>Import a backup</h3><p className="muted small">Restore data from a previous Rero JSON export.</p></div><button className="btn btn-secondary" onClick={()=>fileInput.current?.click()}>Choose file</button><input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={e=>{importData(e.target.files?.[0]); e.target.value = ''}}/></section><section className="panel settings-card"><div className="settings-icon"><Moon size={19}/></div><div className="settings-body"><h3>Appearance</h3><p className="muted small">Choose the look that feels right.</p></div><button className="btn btn-secondary" onClick={()=>setDark(!dark)}>{dark?'Switch to light':'Switch to dark'} mode</button></section><section className="panel settings-card"><div className="settings-icon"><Volume2 size={19}/></div><div className="settings-body"><h3>Voice support</h3><p className="muted small">Uses browser speech recognition and speech synthesis where supported.</p></div><button className="btn btn-secondary" onClick={()=>{if('speechSynthesis' in window){const u=new SpeechSynthesisUtterance('Hello. Welcome to Rero. Keep speaking, learning, and growing.');window.speechSynthesis.speak(u);setNotice('Playing a voice test.')}else setNotice('Speech synthesis is not supported in this browser.')}}>Test voice</button></section><section className="panel danger-zone"><div><h3>Clear all data</h3><p className="muted small">Permanently remove diary entries and expressions from this browser.</p></div><button className="btn btn-danger-outline" onClick={()=>{if(window.confirm('This permanently deletes all Rero entries and expressions stored in this browser. Export a backup first if you need one.')){setEntries([]);setExpressions([]);setActivities([]);setSelectedEntry(null);setNotice('All local data cleared.')}}}><Trash2 size={16}/> Clear data</button></section></div><p className="footnote">Rero v1.0 · Free, private, and ad-free. Your diary stays in this browser unless you export it.</p></>}

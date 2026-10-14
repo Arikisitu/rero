@@ -46,14 +46,82 @@ jobs:
         run: ./gradlew assembleDebug --stacktrace --no-daemon
         working-directory: android
 
-      - name: Verify APK Generated
-        run: |
-          ls -la android/app/build/outputs/apk/debug/
-          find android/ -name "*.apk"
+      - name: Build Android Release APK
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
+        working-directory: android
 
-      - name: Upload APK artifact
+      - name: Sign Release APK or Prepare Artifacts
+        id: sign_step
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p android_artifacts
+          cp android/app/build/outputs/apk/debug/app-debug.apk android_artifacts/rero-debug.apk
+
+          RELEASE_UNSIGNED=$(find android/app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
+          echo "Found release output: $RELEASE_UNSIGNED"
+
+          BUILD_TOOLS_DIR=$(find $ANDROID_HOME/build-tools -maxdepth 1 -mindepth 1 | sort -V | tail -n 1)
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
+          echo "Using build tools from: $BUILD_TOOLS_DIR"
+
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "Signing release APK with provided GitHub Secrets..."
+            echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+
+            $ZIPALIGN -v -p 4 "$RELEASE_UNSIGNED" android_artifacts/rero-release-aligned.apk
+            $APKSIGNER sign --ks release.keystore \
+              --ks-pass pass:"$KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass pass:"$KEY_PASSWORD" \
+              --out android_artifacts/rero-release.apk \
+              android_artifacts/rero-release-aligned.apk
+
+            echo "Verifying signed release APK..."
+            VERIFY_OUTPUT=$($APKSIGNER verify --verbose --print-certs android_artifacts/rero-release.apk)
+            echo "$VERIFY_OUTPUT"
+
+            rm -f release.keystore android_artifacts/rero-release-aligned.apk
+            echo "is_signed=true" >> $GITHUB_OUTPUT
+
+            echo "### Release APK Signing Succeeded! :lock: :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The release APK has been properly signed and verified." >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$VERIFY_OUTPUT" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No signing secrets provided. Publishing unsigned release APK and debug APK..."
+            cp "$RELEASE_UNSIGNED" android_artifacts/rero-release-unsigned.apk
+            echo "is_signed=false" >> $GITHUB_OUTPUT
+
+            echo "### Release APK Signing Notice :warning:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "A release APK was successfully built, but signing secrets were not detected in GitHub Secrets." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "To enable automated production APK signing, add the following 4 secrets under **Repository Settings → Secrets and variables → Actions**:" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ANDROID_KEYSTORE_BASE64\`: Base64 encoded \`.jks\` or \`.keystore\` file" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ANDROID_KEYSTORE_PASSWORD\`: Keystore password" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ANDROID_KEY_ALIAS\`: Key alias name" >> $GITHUB_STEP_SUMMARY
+            echo "- \`ANDROID_KEY_PASSWORD\`: Key alias password" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Both \`rero-debug.apk\` (installable immediately) and \`rero-release-unsigned.apk\` have been uploaded as artifacts." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: rero-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: android_artifacts/rero-debug.apk
+          if-no-files-found: error
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rero-release-apk
+          path: android_artifacts/rero-release*.apk
           if-no-files-found: error
