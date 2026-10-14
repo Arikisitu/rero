@@ -43,7 +43,14 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Build Android Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: |
+          if ! ./gradlew assembleDebug --stacktrace --no-daemon 2>&1 | tee build.log; then
+            echo "## Gradle Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 100 build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
         working-directory: android
 
       - name: Upload APK artifact
