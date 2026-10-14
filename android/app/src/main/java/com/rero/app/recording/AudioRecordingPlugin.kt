@@ -20,17 +20,13 @@ import java.io.File
         Permission(
             alias = "microphone",
             strings = [Manifest.permission.RECORD_AUDIO]
-        ),
-        Permission(
-            alias = "notification",
-            strings = ["android.permission.POST_NOTIFICATIONS"]
         )
     ]
 )
 class AudioRecordingPlugin : Plugin() {
 
     @PluginMethod
-    fun hasPermissions(call: PluginCall) {
+    fun checkAudioPermissions(call: PluginCall) {
         val micGranted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO
@@ -42,27 +38,24 @@ class AudioRecordingPlugin : Plugin() {
     }
 
     @PluginMethod
-    fun requestPermissions(call: PluginCall) {
-        val permissionsToRequest = mutableListOf(Manifest.permission.RECORD_AUDIO)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionsToRequest.add("android.permission.POST_NOTIFICATIONS")
-        }
+    fun requestAudioPermissions(call: PluginCall) {
+        val micGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
 
-        val allGranted = permissionsToRequest.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-
-        if (allGranted) {
+        if (micGranted) {
             val ret = JSObject()
             ret.put("granted", true)
             call.resolve(ret)
-        } else {
-            requestPermissionForAlias("microphone", call, "checkMicPermissionCallback")
+            return
         }
+
+        requestPermissionForAlias("microphone", call, "checkMicPermissionCallback")
     }
 
     @PermissionCallback
-    private fun checkMicPermissionCallback(call: PluginCall) {
+    fun checkMicPermissionCallback(call: PluginCall) {
         val micGranted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO

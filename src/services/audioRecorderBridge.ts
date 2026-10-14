@@ -23,8 +23,8 @@ interface AudioRecordingPluginInterface {
   }>
   getRecordingState(): Promise<RecordingState>
   deleteAudioFile(options: { filePath: string }): Promise<{ success: boolean }>
-  hasPermissions(): Promise<{ granted: boolean }>
-  requestPermissions(): Promise<{ granted: boolean }>
+  checkAudioPermissions(): Promise<{ granted: boolean }>
+  requestAudioPermissions(): Promise<{ granted: boolean }>
 }
 
 const AudioRecordingPlugin = registerPlugin<AudioRecordingPluginInterface>(
@@ -43,10 +43,10 @@ const AudioRecordingPlugin = registerPlugin<AudioRecordingPluginInterface>(
       async deleteAudioFile() {
         return { success: true }
       },
-      async hasPermissions() {
+      async checkAudioPermissions() {
         return { granted: true }
       },
-      async requestPermissions() {
+      async requestAudioPermissions() {
         return { granted: true }
       }
     }
@@ -68,7 +68,7 @@ export async function startNativeAudioRecording(): Promise<{
   }
 
   try {
-    const perm = await AudioRecordingPlugin.requestPermissions()
+    const perm = await AudioRecordingPlugin.requestAudioPermissions()
     if (!perm.granted) {
       console.warn('Microphone permission not granted for native background service')
       return { success: false }

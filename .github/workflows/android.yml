@@ -43,11 +43,25 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Build Android Debug APK
-        run: ./gradlew assembleDebug --stacktrace --info --no-daemon
+        run: |
+          ./gradlew assembleDebug --stacktrace --info --no-daemon 2>&1 | tee debug_build.log || {
+            echo "### Debug APK Build Failed :x:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 60 debug_build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
         working-directory: android
 
       - name: Build Android Release APK
-        run: ./gradlew assembleRelease --stacktrace --info --no-daemon
+        run: |
+          ./gradlew assembleRelease --stacktrace --info --no-daemon 2>&1 | tee release_build.log || {
+            echo "### Release APK Build Failed :x:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 60 release_build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
         working-directory: android
 
       - name: Sign Release APK or Prepare Artifacts
