@@ -43,11 +43,11 @@ jobs:
         run: chmod +x android/gradlew
 
       - name: Build Android Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        run: ./gradlew assembleDebug --stacktrace --info --no-daemon
         working-directory: android
 
       - name: Build Android Release APK
-        run: ./gradlew assembleRelease --stacktrace --no-daemon
+        run: ./gradlew assembleRelease --stacktrace --info --no-daemon
         working-directory: android
 
       - name: Sign Release APK or Prepare Artifacts

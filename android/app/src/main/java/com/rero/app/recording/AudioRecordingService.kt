@@ -14,12 +14,10 @@ import android.media.AudioManager
 import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
-import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.rero.app.MainActivity
 import com.rero.app.R
 import java.io.File
-import java.io.IOException
 
 class AudioRecordingService : Service() {
 
@@ -164,7 +162,12 @@ class AudioRecordingService : Service() {
             AudioRecordingStorage.setRecordingStopped(this, "discard", duration)
         }
 
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         return resultPath
     }
 
@@ -203,7 +206,7 @@ class AudioRecordingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🎙️ Rero Speaking Session")
             .setContentText("Recording in background · Tap to open")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(contentPendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -263,7 +266,9 @@ class AudioRecordingService : Service() {
         try {
             mediaRecorder?.reset()
             mediaRecorder?.release()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            // ignore
+        }
         mediaRecorder = null
         isRecording = false
         abandonAudioFocus()

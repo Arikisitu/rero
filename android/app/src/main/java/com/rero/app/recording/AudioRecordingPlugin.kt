@@ -11,6 +11,7 @@ import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
 import java.io.File
 
 @CapacitorPlugin(
@@ -60,6 +61,18 @@ class AudioRecordingPlugin : Plugin() {
         }
     }
 
+    @PermissionCallback
+    private fun checkMicPermissionCallback(call: PluginCall) {
+        val micGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val ret = JSObject()
+        ret.put("granted", micGranted)
+        call.resolve(ret)
+    }
+
     @PluginMethod
     fun startRecording(call: PluginCall) {
         val micGranted = ContextCompat.checkSelfPermission(
@@ -92,7 +105,7 @@ class AudioRecordingPlugin : Plugin() {
         val discard = call.getBoolean("discard", false) ?: false
         val active = AudioRecordingService.activeService
 
-        val duration = if (active != null) {
+        if (active != null) {
             val path = active.stopRecording(save = !discard)
             val dur = AudioRecordingStorage.getLastDurationMs(context)
             val ret = JSObject()
@@ -101,7 +114,6 @@ class AudioRecordingPlugin : Plugin() {
             ret.put("durationMs", dur)
             ret.put("discarded", discard)
             call.resolve(ret)
-            return
         } else {
             // Service might have been stopped via notification action
             val path = AudioRecordingStorage.getCurrentAudioPath(context)
@@ -112,7 +124,6 @@ class AudioRecordingPlugin : Plugin() {
             ret.put("durationMs", dur)
             ret.put("discarded", discard)
             call.resolve(ret)
-            return
         }
     }
 
