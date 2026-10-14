@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_large_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@drawable/widget_card_bg">
+
+    <!-- Top row: App branding + Streak counter -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="rero"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/rero_purple_deep" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Speak · Learn · Grow"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/widget_badge_bg"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔥"
+                android:textSize="13sp" />
+
+            <TextView
+                android:id="@+id/widget_large_streak_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="0 days streak"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:textColor="@color/rero_purple_dark" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Weekly dots row (7 days: Mon to Sun) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="8dp">
+
+        <!-- Day 0: Mon -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/widget_day_name_0"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="M"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+            <ImageView
+                android:id="@+id/widget_day_dot_0"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginTop="4dp"
+                android:src="@drawable/widget_dot_inactive"
+                android:contentDescription="Day 1" />
+        </LinearLayout>
+
+        <!-- Day 1: Tue -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/widget_day_name_1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="T"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+            <ImageView
+                android:id="@+id/widget_day_dot_1"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginTop="4dp"
+                android:src="@drawable/widget_dot_inactive"
+                android:contentDescription="Day 2" />
+        </LinearLayout>
+
+        <!-- Day 2: Wed -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/widget_day_name_2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="W"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+            <ImageView
+                android:id="@+id/widget_day_dot_2"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginTop="4dp"
+                android:src="@drawable/widget_dot_inactive"
+                android:contentDescription="Day 3" />
+        </LinearLayout>
+
+        <!-- Day 3: Thu -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/widget_day_name_3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="T"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+            <ImageView
+                android:id="@+id/widget_day_dot_3"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginTop="4dp"
+                android:src="@drawable/widget_dot_inactive"
+                android:contentDescription="Day 4" />
+        </LinearLayout>
+
+        <!-- Day 4: Fri -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/widget_day_name_4"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="F"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+            <ImageView
+                android:id="@+id/widget_day_dot_4"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginTop="4dp"
+                android:src="@drawable/widget_dot_inactive"
+                android:contentDescription="Day 5" />
+        </LinearLayout>
+
+        <!-- Day 5: Sat -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/widget_day_name_5"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="S"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+            <ImageView
+                android:id="@+id/widget_day_dot_5"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginTop="4dp"
+                android:src="@drawable/widget_dot_inactive"
+                android:contentDescription="Day 6" />
+        </LinearLayout>
+
+        <!-- Day 6: Sun -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/widget_day_name_6"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="S"
+                android:textSize="10sp"
+                android:textColor="@color/rero_muted" />
+            <ImageView
+                android:id="@+id/widget_day_dot_6"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_marginTop="4dp"
+                android:src="@drawable/widget_dot_inactive"
+                android:contentDescription="Day 7" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Bottom row: status & action button -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_large_status"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Practice speaking today"
+            android:textSize="11sp"
+            android:textColor="@color/rero_muted" />
+
+        <TextView
+            android:id="@+id/widget_large_action_btn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_badge_bg"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:text="Open Diary ↗"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="@color/rero_purple_dark" />
+    </LinearLayout>
+
+</LinearLayout>

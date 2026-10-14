@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Rero</string>
+    <string name="title_activity_main">Rero</string>
+    <string name="package_name">com.rero.app</string>
+    <string name="custom_url_scheme">com.rero.app</string>
+    <string name="widget_streak_description">View your current speaking streak and daily goal.</string>
+    <string name="widget_weekly_description">Track your weekly speaking practice and open diary.</string>
+</resources>

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="rero_purple">#9278DB</color>
+    <color name="rero_purple_dark">#6A4FB6</color>
+    <color name="rero_purple_deep">#2E2541</color>
+    <color name="rero_lavender_bg">#F7F4FC</color>
+    <color name="rero_lavender_card">#FFFFFF</color>
+    <color name="rero_lavender_border">#EBE4F7</color>
+    <color name="rero_muted">#7A7289</color>
+    <color name="rero_green">#258B67</color>
+    <color name="rero_green_bg">#E7F8EF</color>
+    <color name="rero_green_border">#C5ECD8</color>
+    <color name="rero_flame">#F07241</color>
+    <color name="rero_flame_bg">#FFF0EA</color>
+</resources>
